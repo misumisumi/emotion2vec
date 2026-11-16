@@ -1,0 +1,42 @@
+Bootstrap: docker
+From: nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
+
+%labels
+    Description Container for fine-tuning emotion2vec+ on Japanese emotional speech
+    Maintainer kobayashi.sumiharu.r4
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PYTHONUNBUFFERED=1
+    export HF_HUB_OFFLINE=1
+    export TOKENIZERS_PARALLELISM=false
+    export PYTHONPATH=/workspace/emotion2vec/finetune:$PYTHONPATH
+
+%post
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        python3.11 python3.11-venv python3-pip ffmpeg libsndfile1 git ca-certificates
+    python3.11 -m venv /opt/venv
+    /opt/venv/bin/pip install --no-cache-dir --upgrade pip
+    /opt/venv/bin/pip install --no-cache-dir \
+        "torch==2.15.0" "torchaudio==2.11.1" \
+        --index-url https://download.pytorch.org/whl/cu132
+    /opt/venv/bin/pip install --no-cache-dir \
+        "funasr==1.4.24" \
+        "soundfile" \
+        "numpy" \
+        "omegaconf" \
+        "hydra-core" \
+        "pyyaml" \
+        "tqdm" \
+        "tensorboard"
+    apt-get clean
+    rm -rf /var/lib/apt/lists/*
+
+%test
+    /opt/venv/bin/python -c "import torch; assert torch.cuda.is_available(); import funasr; import soundfile; print('container self-test OK: torch', torch.__version__, 'funasr', funasr.__version__)"
+
+%runscript
+    # Default entry: fine-tune with a config file, e.g.
+    #   apptainer run --nv e2v-ft.sif finetune/config/base.yaml
+    exec /opt/venv/bin/python /workspace/emotion2vec/finetune/train.py --config "$@"
