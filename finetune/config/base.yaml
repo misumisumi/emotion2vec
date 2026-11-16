@@ -1,0 +1,15 @@
+# emotion2vec+ base fine-tune (top layers) on JVNV + JTES + OGVC
+# base: depth 8 -> trainable blocks 5,6,7 (the 6th-8th layer) + proj
+model_dir: /disk/fs1/bigtmp/kobayashi.sumiharu.r4/Workspace/SER-model-comparison/models/emotion2vec_plus_base
+manifest_root: finetune/manifests_ft
+datasets: [jvnv, jtes, ogvc_acted, ogvc_natural]
+train_blocks: 3
+epochs: 10
+batch_size: 16
+lr: 1.0e-5
+weight_decay: 1.0e-2
+warmup_steps: 200
+max_seconds: 10.0
+num_workers: 4
+seed: 42
+out: finetune/runs/base

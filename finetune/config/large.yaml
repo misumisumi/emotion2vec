@@ -1,0 +1,17 @@
+# emotion2vec+ large fine-tune (top layers) on JVNV + JTES + OGVC
+# large: depth 24 -> the last 4 blocks (blocks.20-23) + proj, same
+# "upper few layers only" rule as base. Verify the actual depth of the
+# checkpoint on first load: param_audit.json records train_block_indices.
+model_dir: /path/to/emotion2vec_plus_large
+manifest_root: finetune/manifests_ft
+datasets: [jvnv, jtes, ogvc_acted, ogvc_natural]
+train_blocks: 4
+epochs: 10
+batch_size: 8
+lr: 5.0e-6
+weight_decay: 1.0e-2
+warmup_steps: 200
+max_seconds: 10.0
+num_workers: 4
+seed: 42
+out: finetune/runs/large
