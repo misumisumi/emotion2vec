@@ -63,25 +63,37 @@ large: train_blocks=4, batch_size=8, lr=5e-6(初回ロード時にparam_audit.js
 
 ### 5. コンテナ — `container/apptainer.def`
 
-- ベース: `nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04`、python3.11 venv、torch 2.15.0+cu132、
-  funasr 1.4.24、soundfile、omegaconf、hydra-core、pyyaml、tensorboard、ffmpeg。
-- `%test`: torch CUDA / funasr / soundfile import。
+- ベース: `nvidia/cuda:12.9.1-cudnn-devel-ubuntu24.04`、python3.12 venv、torch 2.15.0+cu132、
+  funasr 1.4.24、soundfile、omegaconf、hydra-core、pyyaml、tensorboard。
+  (ubuntu24.04(noble)にはpython3.11が無いため3.12を使用。torch 2.15.0+cu132はcp312 wheelあり。
+  ffmpeg/gitは不使用: クリップは事前生成済み。root-mapped namespaceでdpkg postinstの
+  chownが失敗するため、fontconfigを引き込む重いパッケージを避けている)
 - `%runscript`: `apptainer run --nv e2v-ft.sif finetune/config/base.yaml` で学習開始。
+  (`%test`はGPU前提でビルドマシンを選ぶため置いていない。検証は実行後に手動で行う)
 
 ビルドと実行(学習マシン):
 ```bash
 cd container
-apptainer build e2v-ft.sif apptainer.def
-# モデル・データ・リポジトリをbindして実行
-apptainer run --nv \
+# ビルド(既存apptainer.sifがある場合・defを編集した場合):
+apptainer build --fakeroot apptainer.sif apptainer.def
+
+# 実行: モデル・クリップ・リポジトリをbindする。クリップはmanifestのclip_pathと同じ絶対パスで見せること。
+apptainer exec --nv \
   --bind /path/to/emotion2vec:/workspace/emotion2vec \
   --bind /path/to/SER-model-comparison/models:/models \
-  --bind /path/to/ser_clips:/clips \
-  e2v-ft.sif finetune/config/base.yaml
+  --bind /path/to/SER-model-comparison/data/clips:/path/to/SER-model-comparison/data/clips \
+  apptainer.sif /opt/venv/bin/python /workspace/emotion2vec/finetune/train.py \
+    --model-dir /models/emotion2vec_plus_base \
+    --manifest-root /workspace/emotion2vec/finetune/manifests_ft \
+    --config /workspace/emotion2vec/finetune/config/base.yaml
 ```
-注意: manifestのclip_pathは絶対パスで `/localtmp/sumiharu.kobayashi.r4/ser_clips` 配下を指すため、
-学習マシンでは `--bind <クリップ置き場>:/localtmp/sumiharu.kobayashi.r4/ser_clips` で一致させること
+注意: manifestのclip_pathは絶対パス(このマシンでは SER-model-comparison/data/clips 配下)なので、
+学習マシンでは `--bind <クリップ置き場>:<manifestと同じ絶対パス>` で一致させること
 (または分割manifestを学習マシンのパスに合わせて再生成する)。
+
+検証済み(2026-11-17, このマシン): apptainer.sif + --nv で python 3.12.3 / torch 2.15.0+cu132 /
+funasr 1.4.24 / CUDA RTX 3090 を認識し、コンテナ内で学習6ステップが完走(loss有限・変化、
+best_model.pt保存)。ログ: finetune/runs/smoke_sif/train.log。
 
 ### 6. 学習マシンでの実行手順(本番)
 
@@ -99,4 +111,8 @@ python finetune/train.py --config finetune/config/base.yaml
   (eval={f10,f29,m10,m20}, test={f16,f35,m14,m22}, train=92話者)・OGVC-Natural多数決goldのcross-check。
 - C2 パラメータ監査: trainable = blocks.5,6,7 + proj のみ(21,270,537)。逆伝播の非ゼロ勾配も同層のみ。
 - C3 スモークテスト(RTX 3090, CUDA): 12ステップ学習、loss有限・変化(0.0003→8.19)、
-  eval_loss 8.06、`finetune/runs/smoke/best_model.pt` 保存。ログ: `finetune/runs/smoke/train.log`。
+  eval_loss 8.06、`finetune/runs/smoke2/best_model.pt` 保存。ログ: `finetune/runs/smoke2/train.log`
+  (全4データセット、JTES含む)。
+- C4 コンテナ: apptainer.sif(cuda:12.9.1/ubuntu24.04/python3.12)をビルドし、
+  `apptainer exec --nv` でCUDA(RTX 3090)認識・コンテナ内学習6ステップ完走
+  (loss有限・変化、best_model.pt保存)。ログ: `finetune/runs/smoke_sif/train.log`。

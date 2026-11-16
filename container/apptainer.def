@@ -1,5 +1,5 @@
 Bootstrap: docker
-From: nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
+From: nvidia/cuda:12.9.1-cudnn-devel-ubuntu24.04
 
 %labels
     Description Container for fine-tuning emotion2vec+ on Japanese emotional speech
@@ -13,10 +13,15 @@ From: nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
     export PYTHONPATH=/workspace/emotion2vec/finetune:$PYTHONPATH
 
 %post
+    # Root-mapped namespace (no /etc/subuid entry) cannot run apt's
+    # _apt sandbox user (setgroups EPERM), so disable the apt sandbox.
+    echo 'APT::Sandbox::User "root";' > /etc/apt/apt.conf.d/99-no-sandbox
+    # ubuntu24.04 ships Python 3.12 (python3.11 is not in the noble archive),
+    # and torch 2.15.0+cu132 provides cp312 wheels, so use 3.12.
     apt-get update
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        python3.11 python3.11-venv python3-pip ffmpeg libsndfile1 git ca-certificates
-    python3.11 -m venv /opt/venv
+        python3.12 python3.12-venv libsndfile1 ca-certificates
+    python3.12 -m venv /opt/venv
     /opt/venv/bin/pip install --no-cache-dir --upgrade pip
     /opt/venv/bin/pip install --no-cache-dir \
         "torch==2.15.0" "torchaudio==2.11.1" \
@@ -32,9 +37,6 @@ From: nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04
         "tensorboard"
     apt-get clean
     rm -rf /var/lib/apt/lists/*
-
-%test
-    /opt/venv/bin/python -c "import torch; assert torch.cuda.is_available(); import funasr; import soundfile; print('container self-test OK: torch', torch.__version__, 'funasr', funasr.__version__)"
 
 %runscript
     # Default entry: fine-tune with a config file, e.g.
