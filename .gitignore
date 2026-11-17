@@ -8,3 +8,5 @@ container/build-temp-*/
 *.sif
 data/clips/
 finetune/manifests_src/
+.omo
+data
