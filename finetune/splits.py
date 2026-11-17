@@ -1,6 +1,7 @@
 """Train/eval/test split builder for the Japanese emotional-speech fine-tuning.
 
-Reads the SER-model-comparison manifests (JVNV / JTES / OGVC-Acted /
+Reads the manifests produced by finetune/build_clips.py (JVNV / JTES /
+OGVC-Acted / OGVC-Natural; clips materialized under <repo>/data/clips),
 OGVC-Natural), filters rows to the emotion2vec+ 9-class label space, splits
 each dataset into train/eval/test, and records every exclusion (which
 speaker or utterance was dropped and why) so the split is fully auditable.
@@ -267,8 +268,9 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="finetune.splits")
     here = Path(__file__).resolve().parent.parent
     ap.add_argument("--manifest-root", type=Path,
-                    default=here.parent / "SER-model-comparison" / "manifests",
-                    help="directory containing {jvnv,jtes,ogvc_acted,ogvc_natural}.jsonl")
+                    default=here / "finetune" / "manifests_src",
+                    help="directory containing {jvnv,jtes,ogvc_acted,ogvc_natural}.jsonl "
+                         "(built by finetune/build_clips.py; clips live in this repo)")
     ap.add_argument("--out-root", type=Path, default=here / "finetune" / "manifests_ft")
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--datasets", nargs="*", default=DATASETS)

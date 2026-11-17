@@ -4,9 +4,26 @@
 
 ## 実装内容 (2026-11-16)
 
+### 0. クリップ実体化 — `finetune/build_clips.py`
+
+SERのクリップを流用せず、元コーパスから**このリポジトリ内** (`data/clips/<dataset>/`) に
+16kHz/16bit/mono wavをffmpegで実体化する。SER-model-comparisonのmanifestは
+コーパスパス・ラベル情報の参照元としてのみ使用する。
+
+- JTES (`/disk/fs1/Corpus/JTES`)、OGVC (`/disk/fs1/Corpus/OGVC`): manifestのsource_pathをffmpegで直接変換。
+- JVNV: manifestのsource_pathの展開済みツリーは消滅しているため、
+  `jvnv_ver1.zip` アーカイブから該当wavを抽出して変換(`--jvnv-zip` で指定)。
+- 出力: `data/clips/<dataset>/<utt_id>.wav` + `finetune/manifests_src/<dataset>.jsonl`
+  (clip_pathを自前クリップのパスに書き換えたmanifest)。
+
+実行:
+```bash
+python finetune/build_clips.py  # 全4データセット、28,085クリップ
+```
+
 ### 1. データ分割 — `finetune/splits.py`
 
-SER-model-comparison (`../SER-model-comparison/manifests/*.jsonl`, 16kHz/16bit/monoクリップ) の
+`finetune/manifests_src/*.jsonl` (build_clips.pyが生成、クリップは`data/clips/`) の
 JVNV / JTES / OGVC-Acted / OGVC-Natural マニフェストから、学習・評価・テスト分割を生成する。
 
 出力: `finetune/manifests_ft/<dataset>/{train,eval,test}.jsonl` + `exclusions.{md,json}`
@@ -29,7 +46,7 @@ JVNV / JTES / OGVC-Acted / OGVC-Natural マニフェストから、学習・評�
 
 実行:
 ```bash
-python finetune/splits.py --manifest-root ../SER-model-comparison/manifests --out-root finetune/manifests_ft
+python finetune/splits.py  # manifests_src(自前クリップ) -> manifests_ft
 ```
 
 ### 2. FTモデル — `finetune/model.py`
@@ -98,7 +115,9 @@ best_model.pt保存)。ログ: finetune/runs/smoke_sif/train.log。
 ### 6. 学習マシンでの実行手順(本番)
 
 ```bash
-# 1) 分割manifest生成(データセットとクリップが見えるマシンで)
+# 0) クリップ実体化(元コーパスとSER manifestが見えるマシンで)
+python finetune/build_clips.py
+# 1) 分割manifest生成
 python finetune/splits.py --manifest-root <SER-model-comparison>/manifests
 # 2) FT実行(このマシンでスモークテスト済み: 12ステップ, loss有限・変化, ckpt保存)
 python finetune/train.py --config finetune/config/base.yaml
@@ -113,6 +132,9 @@ python finetune/train.py --config finetune/config/base.yaml
 - C3 スモークテスト(RTX 3090, CUDA): 12ステップ学習、loss有限・変化(0.0003→8.19)、
   eval_loss 8.06、`finetune/runs/smoke2/best_model.pt` 保存。ログ: `finetune/runs/smoke2/train.log`
   (全4データセット、JTES含む)。
+- C0 クリップ自前実体化: 28,085クリップ(16kHz/mono/PCM_16検証済み、JVNVはzip抽出)を
+  data/clips/に生成、missing=0。分割再生成後、venv直・sif内の両面で学習スモーク完走
+  (runs/smoke_local, runs/smoke_local_sif)。
 - C4 コンテナ: apptainer.sif(cuda:12.9.1/ubuntu24.04/python3.12)をビルドし、
   `apptainer exec --nv` でCUDA(RTX 3090)認識・コンテナ内学習6ステップ完走
   (loss有限・変化、best_model.pt保存)。ログ: `finetune/runs/smoke_sif/train.log`。

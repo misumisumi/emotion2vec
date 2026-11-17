@@ -6,3 +6,5 @@ finetune/manifests_ft/
 container/e2v-ft-sandbox/
 container/build-temp-*/
 *.sif
+data/clips/
+finetune/manifests_src/
