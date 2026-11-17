@@ -17,6 +17,7 @@ SERのクリップを流用せず、元コーパスから**このリポジトリ
   (clip_pathを自前クリップのパスに書き換えたmanifest)。
 
 実行:
+
 ```bash
 python finetune/build_clips.py  # 全4データセット、28,085クリップ
 ```
@@ -28,14 +29,15 @@ JVNV / JTES / OGVC-Acted / OGVC-Natural マニフェストから、学習・評�
 
 出力: `finetune/manifests_ft/<dataset>/{train,eval,test}.jsonl` + `exclusions.{md,json}`
 
-| データセット | 分割方法 | train / eval / test | 除外 |
-| --- | --- | --- | --- |
-| JVNV (1,615発話/4話者/6感情) | 発話ベース、(話者×感情)層化、seed=42、70/15/15 | 1,127 / 244 / 244 | なし |
-| JTES (20,000発話/100話者/4感情 ang,joy,neu,sad) | **話者ベース(ユーザー固定)** | 18,400 / 800 / 800 | eval=f10,f29,m10,m20、test=f16,f35,m14,m22 を学習から除外(残り92話者がtrain) |
-| OGVC-Acted (2,656発話/4話者/8感情) | 発話ベース、(話者×感情)層化、seed=42 | 1,416 / 300 / 300 | 640行: ACC/ANT(感情ラベルとして9クラスに非該当)。intensity=0はNEUとして使用 |
-| OGVC-Natural (3,814発話/13話者/3評定者) | 話者ベース(greedy比率fit、seed=42) | 1,789 / 493 / 617 | 915行: 多数決ラベルがACC/ANT/OTHの行。eval話者=03_FTY,06_FWA、test話者=04_MNN,04_MSY |
+| データセット                                    | 分割方法                                       | train / eval / test | 除外                                                                                 |
+| ----------------------------------------------- | ---------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------ |
+| JVNV (1,615発話/4話者/6感情)                    | 発話ベース、(話者×感情)層化、seed=42、70/15/15 | 1,127 / 244 / 244   | なし                                                                                 |
+| JTES (20,000発話/100話者/4感情 ang,joy,neu,sad) | **話者ベース(ユーザー固定)**                   | 18,400 / 800 / 800  | eval=f10,f29,m10,m20、test=f16,f35,m14,m22 を学習から除外(残り92話者がtrain)         |
+| OGVC-Acted (2,656発話/4話者/8感情)              | 発話ベース、(話者×感情)層化、seed=42           | 1,416 / 300 / 300   | 640行: ACC/ANT(感情ラベルとして9クラスに非該当)。intensity=0はNEUとして使用          |
+| OGVC-Natural (3,814発話/13話者/3評定者)         | 話者ベース(greedy比率fit、seed=42)             | 1,789 / 493 / 617   | 915行: 多数決ラベルがACC/ANT/OTHの行。eval話者=03_FTY,06_FWA、test話者=04_MNN,04_MSY |
 
 仕様:
+
 - **ラベル空間はemotion2vec+の9クラス**(ANG, DIS, FEA, HAP, NEU, SAD, SUR, OTHER, UNKNOWN)。
   学習データに出現するのは7クラス(OTHER/UNKNOWNは学習データに存在しない。OGVCのOTHは非感情として除外)。
 - **OGVC-Naturalの多数決**: 3評定者の多数決(>=2/3)でラベルが決定しない発話は省く。
@@ -45,6 +47,7 @@ JVNV / JTES / OGVC-Acted / OGVC-Natural マニフェストから、学習・評�
   JTESは話者割当、OGVC-Naturalは話者割当+除外行(utt_id, speaker, native_emotion, reason, raters)を記載。
 
 実行:
+
 ```bash
 python finetune/splits.py  # manifests_src(自前クリップ) -> manifests_ft
 ```
@@ -69,6 +72,12 @@ python finetune/splits.py  # manifests_src(自前クリップ) -> manifests_ft
 
 - 16kHz wavを読み、`F.layer_norm`で正規化(emotion2vec+)の前処理と同一)、可変長パディング+padding_mask。
 - CrossEntropyLoss + AdamW(trainableのみ) + warmup付き線形decay + grad clip 5.0。
+- TensorBoard: <out>/tensorboard/ に train/loss, train/lr, eval/loss, eval/wa を記録(--no-tensorboard で無効化)。
+  tensorboard --logdir finetune/runs/<run>/tensorboard で閲覧。
+- Early stopping: eval毎(--eval-every, 既定10ステップ)にeval_lossを判定し、
+  --early-stop-patience(既定5)回連続で改善(--early-stop-min-delta以上)がなければ停止。
+  meta.json に early_stopped / evals_since_best を記録。
+- batch_size 既定は 32(config/base.yaml, config/large.yamlも同様)。
 - 10ステップごとにeval_loss/WAを計測、bestを `best_model.pt` (modelのstate_dict)に保存。
   funasr AutoModelと同じ形式で再ロード可能。
 - スモークテストモード: `--max-steps N --limit M`(データセット先頭M行でNステップだけ学習)。
@@ -89,6 +98,7 @@ large: train_blocks=4, batch_size=8, lr=5e-6(初回ロード時にparam_audit.js
   (`%test`はGPU前提でビルドマシンを選ぶため置いていない。検証は実行後に手動で行う)
 
 ビルドと実行(学習マシン):
+
 ```bash
 cd container
 # ビルド(既存apptainer.sifがある場合・defを編集した場合):
@@ -96,14 +106,12 @@ apptainer build --fakeroot apptainer.sif apptainer.def
 
 # 実行: モデル・クリップ・リポジトリをbindする。クリップはmanifestのclip_pathと同じ絶対パスで見せること。
 apptainer exec --nv \
-  --bind /path/to/emotion2vec:/workspace/emotion2vec \
-  --bind /path/to/SER-model-comparison/models:/models \
-  --bind /path/to/SER-model-comparison/data/clips:/path/to/SER-model-comparison/data/clips \
-  apptainer.sif /opt/venv/bin/python /workspace/emotion2vec/finetune/train.py \
-    --model-dir /models/emotion2vec_plus_base \
-    --manifest-root /workspace/emotion2vec/finetune/manifests_ft \
-    --config /workspace/emotion2vec/finetune/config/base.yaml
+  apptainer.sif /opt/venv/bin/python finetune/train.py \
+    --model-dir /path/to/emotion2vec_plus_base \
+    --manifest-root finetune/manifests_ft \
+    --config finetune/config/base.yaml
 ```
+
 注意: manifestのclip_pathは絶対パス(このマシンでは SER-model-comparison/data/clips 配下)なので、
 学習マシンでは `--bind <クリップ置き場>:<manifestと同じ絶対パス>` で一致させること
 (または分割manifestを学習マシンのパスに合わせて再生成する)。
@@ -135,6 +143,9 @@ python finetune/train.py --config finetune/config/base.yaml
 - C0 クリップ自前実体化: 28,085クリップ(16kHz/mono/PCM_16検証済み、JVNVはzip抽出)を
   data/clips/に生成、missing=0。分割再生成後、venv直・sif内の両面で学習スモーク完走
   (runs/smoke_local, runs/smoke_local_sif)。
+- TensorBoard: smoke_tbでtrain/loss(18点), train/lr, eval/loss(9点), eval/waを記録、EventAccumulatorで読み取り検証済み。
+  sif内でもイベント書き込み確認済み(smoke_tb_sif)。
+- Early stopping: patience=1/min_delta=1.0の強制発火テストでstep 4で停止、meta.jsonにearly_stopped=true記録を確認済み。
 - C4 コンテナ: apptainer.sif(cuda:12.9.1/ubuntu24.04/python3.12)をビルドし、
   `apptainer exec --nv` でCUDA(RTX 3090)認識・コンテナ内学習6ステップ完走
   (loss有限・変化、best_model.pt保存)。ログ: `finetune/runs/smoke_sif/train.log`。

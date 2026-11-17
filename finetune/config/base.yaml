@@ -5,11 +5,15 @@ manifest_root: finetune/manifests_ft
 datasets: [jvnv, jtes, ogvc_acted, ogvc_natural]
 train_blocks: 3
 epochs: 10
-batch_size: 16
+batch_size: 32
 lr: 1.0e-5
 weight_decay: 1.0e-2
 warmup_steps: 200
 max_seconds: 10.0
+eval_every: 10
+early_stop_patience: 5
+early_stop_min_delta: 1.0e-4
+tensorboard: true
 num_workers: 4
 seed: 42
 out: finetune/runs/base

@@ -66,11 +66,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--epochs", type=int, default=10)
     ap.add_argument("--max-steps", type=int, default=None, help="cap optimizer steps (smoke test)")
     ap.add_argument("--limit", type=int, default=None, help="cap rows per dataset (smoke test)")
-    ap.add_argument("--batch-size", type=int, default=16)
+    ap.add_argument("--batch-size", type=int, default=32)
     ap.add_argument("--lr", type=float, default=1e-5)
     ap.add_argument("--weight-decay", type=float, default=1e-2)
     ap.add_argument("--warmup-steps", type=int, default=200)
     ap.add_argument("--max-seconds", type=float, default=10.0, help="truncate wavs longer than this")
+    ap.add_argument("--eval-every", type=int, default=10, help="optimizer steps between evals")
+    ap.add_argument("--early-stop-patience", type=int, default=5,
+                    help="stop when eval_loss has not improved for this many evals; 0 disables")
+    ap.add_argument("--early-stop-min-delta", type=float, default=1e-4,
+                    help="minimum eval_loss improvement counted as improvement")
+    ap.add_argument("--tensorboard", action=argparse.BooleanOptionalAction, default=True,
+                    help="write TensorBoard event files under <out>/tensorboard")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--num-workers", type=int, default=4)
     ap.add_argument("--seed", type=int, default=42)
@@ -143,8 +150,18 @@ def main(argv: list[str] | None = None) -> int:
 
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
+    writer = None
+    if args.tensorboard:
+        try:
+            from torch.utils.tensorboard import SummaryWriter
+            writer = SummaryWriter(log_dir=str(args.out / "tensorboard"))
+        except ImportError:
+            logger.warning("tensorboard not installed; event logging disabled")
+
     steps = 0
     best_eval = float("inf")
+    evals_since_best = 0
+    stopped_early = False
     log_path = args.out / "train.log"
     log_lines: list[str] = []
 
@@ -179,7 +196,10 @@ def main(argv: list[str] | None = None) -> int:
                 scheduler.step()
                 steps += 1
                 log(f"epoch {epoch} step {steps} loss {loss.item():.6f} lr {scheduler.get_last_lr()[0]:.2e}")
-                if steps % 10 == 0:
+                if writer is not None:
+                    writer.add_scalar("train/loss", loss.item(), steps)
+                    writer.add_scalar("train/lr", scheduler.get_last_lr()[0], steps)
+                if steps % args.eval_every == 0:
                     model.eval()
                     ev_loss = ev_metrics = None
                     ev_loss_total, ev_n = 0.0, 0
@@ -195,12 +215,26 @@ def main(argv: list[str] | None = None) -> int:
                                 ev_n += elabels.size(0)
                                 correct += (elogits.argmax(-1) == elabels).sum().item()
                     ev_loss = ev_loss_total / max(ev_n, 1)
-                    log(f"epoch {epoch} step {steps} eval_loss {ev_loss:.6f} eval_wa {correct / max(ev_n, 1):.4f}")
-                    if ev_loss < best_eval:
+                    ev_wa = correct / max(ev_n, 1)
+                    log(f"epoch {epoch} step {steps} eval_loss {ev_loss:.6f} eval_wa {ev_wa:.4f}")
+                    if writer is not None:
+                        writer.add_scalar("eval/loss", ev_loss, steps)
+                        writer.add_scalar("eval/wa", ev_wa, steps)
+                    if ev_loss < best_eval - args.early_stop_min_delta:
                         best_eval = ev_loss
+                        evals_since_best = 0
                         ckpt_path = args.out / "best_model.pt"
                         torch.save(model.state_dict(), ckpt_path)
                         log(f"saved best model to {ckpt_path} (eval_loss={ev_loss:.6f})")
+                    else:
+                        evals_since_best += 1
+                        if 0 < args.early_stop_patience <= evals_since_best:
+                            log(f"early stopping at step {steps}: no eval_loss improvement "
+                                f"for {evals_since_best} evals (best={best_eval:.6f})")
+                            stopped_early = True
+                            model.train()
+                            stop = True
+                            break
                     model.train()
                 if args.max_steps is not None and steps >= args.max_steps:
                     stop = True
@@ -221,13 +255,17 @@ def main(argv: list[str] | None = None) -> int:
         "n_frozen_params": audit["n_frozen_params"],
         "steps": steps,
         "best_eval_loss": best_eval if best_eval != float("inf") else None,
+        "early_stopped": stopped_early,
+        "evals_since_best": evals_since_best,
         "seed": args.seed,
         "date": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "torch_version": torch.__version__,
     }
     (args.out / "meta.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False),
                                         encoding="utf-8")
-    log(f"done: steps={steps} best_eval_loss={meta['best_eval_loss']}")
+    log(f"done: steps={steps} best_eval_loss={meta['best_eval_loss']} early_stopped={stopped_early}")
+    if writer is not None:
+        writer.close()
     return 0
 
 
