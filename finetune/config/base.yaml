@@ -1,19 +1,26 @@
 # emotion2vec+ base fine-tune (top layers) on JVNV + JTES + OGVC
 # base: depth 8 -> trainable blocks 5,6,7 (the 6th-8th layer) + proj
-model_dir: /disk/fs1/bigtmp/kobayashi.sumiharu.r4/Workspace/SER-model-comparison/models/emotion2vec_plus_base
+arch: emotion2vec
+model_dir: models/emotion2vec_plus_base
 manifest_root: finetune/manifests_ft
 datasets: [jvnv, jtes, ogvc_acted, ogvc_natural]
 train_blocks: 3
-epochs: 10
+epochs: 20
 batch_size: 32
 lr: 1.0e-5
+head_lr: null # optional separate LR for the classification head (null = use lr)
+head_dropout: 0.1 # only used by --arch hubert (emotion2vec keeps its own proj head)
 weight_decay: 1.0e-2
 warmup_steps: 200
 max_seconds: 10.0
-eval_every: 10
-early_stop_patience: 5
-early_stop_min_delta: 1.0e-4
+eval_every: 0 # 0 = once per epoch end; N>0 = every N optimizer steps
+eval_metric: macro_loss # best-checkpoint / early-stop metric (macro_* = equal per dataset)
+early_stop_patience: 0 # 0 = disabled: run all epochs and keep the best checkpoint
+early_stop_min_delta: 1.0e-3
+dataset_sampling: balance # each dataset gets 1/N of the epoch steps (JTES alone is 81% of rows)
+rows_per_dataset: null # null = total rows / N datasets (keeps ~709 steps/epoch)
+save_last: true # also write last_model.pt at every epoch end
 tensorboard: true
 num_workers: 4
 seed: 42
-out: finetune/runs/base
+out: null # null = outputs/<YYYYMMDD_HHMMSS>

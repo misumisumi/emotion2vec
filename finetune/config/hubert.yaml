@@ -1,0 +1,40 @@
+# kushinada-hubert-base fine-tune (top layers + fresh head) on JVNV + JTES + OGVC
+#
+# kushinada-hubert-base = Japanese HuBERT base SSL features (12 layers, hidden 768),
+# no classification head. finetune/hubert_model.py adds
+#   proj = LayerNorm(768) -> Dropout(0.1) -> Linear(768, 9)
+# and trains it together with the last `train_blocks` encoder layers
+# (3 -> encoder.layers.9-11) + the encoder's final layer_norm.
+#
+# The head is randomly initialized (unlike emotion2vec+), so a larger LR than the
+# emotion2vec+ run is used; head_lr gives the head its own (higher) LR.
+#
+# Checkpoints (best_model.pt / last_model.pt) are plain state_dicts with
+# encoder.* / proj.* keys; rebuild with
+#   from hubert_model import load_hubert_classifier
+#   load_hubert_classifier("models/kushinada-hubert-base", "outputs/.../best_model.pt",
+#                          num_labels=9, dropout=0.1)
+arch: hubert
+model_dir: models/kushinada-hubert-base
+manifest_root: finetune/manifests_ft
+datasets: [jvnv, jtes, ogvc_acted, ogvc_natural]
+train_blocks: 3
+epochs: 20
+batch_size: 32
+lr: 3.0e-5
+head_lr: 3.0e-4
+head_dropout: 0.1
+weight_decay: 1.0e-2
+warmup_steps: 200
+max_seconds: 10.0
+eval_every: 0 # 0 = once per epoch end; N>0 = N optimizer steps
+eval_metric: macro_loss # best-checkpoint / early-stop metric (macro_* = equal per dataset)
+early_stop_patience: 0 # 0 = disabled: run all epochs and keep best checkpoint
+early_stop_min_delta: 1.0e-3
+dataset_sampling: balance # each dataset gets 1/N of epoch steps (JTES alone 81% rows)
+rows_per_dataset: null # null = total rows / N datasets (keeps ~709 steps/epoch)
+save_last: true # also write last_model.pt at epoch end
+tensorboard: true
+num_workers: 4
+seed: 42
+out: null # null = outputs/<YYYYMMDD_HHMMSS>

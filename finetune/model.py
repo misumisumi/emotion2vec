@@ -1,15 +1,20 @@
-"""emotion2vec+ fine-tuning model wrapper: freeze all but the top blocks.
+"""Fine-tuning model wrappers: emotion2vec+ / HuggingFace HuBERT, top layers only.
 
-The checkpoint is the funasr-packaged emotion2vec+ model (model.pt with
-d2v_model.* keys + proj). We load it with funasr's AutoModel (which applies
-the scope_map d2v_model.->none), then freeze everything except the last N
-transformer blocks and the classification head (proj).
+Supported backbones (``build_model``):
+
+* ``emotion2vec`` -- funasr-packaged emotion2vec+ (model.pt with d2v_model.* keys
+  + a pretrained proj head). Loaded with funasr's AutoModel (which applies the
+  scope_map d2v_model.->none), then everything except the last N transformer
+  blocks and the classification head (proj) is frozen.
+* ``hubert`` -- any HuggingFace HuBERT SSL checkpoint (e.g.
+  ``models/kushinada-hubert-base``). `finetune/hubert_model.py` adds a fresh
+  classification head and freezes the same "upper few layers only".
 
 Layer choice (user decision 2026-11-16): emotion2vec+ base has depth 8
 (blocks.0-7), so the trainable layers are blocks.5,6,7 (the 6th-8th layer)
 plus proj. For large (depth 24), the same rule applies: the last 4 blocks
 plus proj. The number of trainable blocks is configurable so the rule
-"upper few layers only" transfers to any depth.
+"upper few layers only" transfers to any depth (HuBERT base: 12 layers).
 """
 
 from __future__ import annotations
@@ -71,3 +76,28 @@ def forward_logits(model: torch.nn.Module, feats: torch.Tensor,
         keep = (~pm).float().unsqueeze(-1)
         pooled = (x * keep).sum(dim=1) / keep.sum(dim=1).clamp(min=1.0)
     return model.proj(pooled)
+
+
+def build_model(arch: str, model_dir: str, n_train_blocks: int = 3,
+                num_labels: int = 9, head_dropout: float = 0.1,
+                device: str = "cpu") -> tuple[torch.nn.Module, dict]:
+    """Load ``arch`` with an N-way head, freeze all but the top blocks, return (model, audit).
+
+    Both branches expose ``extract_features`` / ``proj`` and work with
+    ``forward_logits`` above, so the training loop is backbone-agnostic.
+    """
+    if arch == "emotion2vec":
+        am = load_e2v(model_dir, device=device)
+        model = am.model
+        model.to(device)
+        audit = freeze_top_layers(model, n_train_blocks=n_train_blocks)
+        return model, audit
+    if arch == "hubert":
+        # Lazy import: hubert_model imports forward_logits from this module.
+        from hubert_model import HubertEmotionClassifier, freeze_hubert_layers
+        model = HubertEmotionClassifier(model_dir, num_labels=num_labels,
+                                        dropout=head_dropout)
+        model.to(device)
+        audit = freeze_hubert_layers(model, n_train_blocks=n_train_blocks)
+        return model, audit
+    raise ValueError(f"unknown arch {arch!r} (expected 'emotion2vec' or 'hubert')")

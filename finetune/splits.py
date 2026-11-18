@@ -24,10 +24,13 @@ import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 
-# emotion2vec+ 9-class label space (tokens.txt order).
+# emotion2vec+ 9-class label space in the exact order of the checkpoint's
+# tokens.txt (angry, disgusted, fearful, happy, neutral, other, sad, surprised,
+# <unk>). The pretrained proj head was trained with this order, so index 5 is
+# OTHER, 6 is SAD and 7 is SUR: do not reorder.
 # "other" and "unknown" exist in the model head but do not occur in the
 # training corpora (OGVC OTH/ACC/ANT are excluded as non-emotion labels).
-E2V_LABELS = ["ANG", "DIS", "FEA", "HAP", "NEU", "SAD", "SUR", "OTHER", "UNKNOWN"]
+E2V_LABELS = ["ANG", "DIS", "FEA", "HAP", "NEU", "OTHER", "SAD", "SUR", "UNKNOWN"]
 LABEL_TO_IDX = {lab: i for i, lab in enumerate(E2V_LABELS)}
 
 # JTES speaker assignment fixed by the user (2026-11-16):

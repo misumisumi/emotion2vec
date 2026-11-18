@@ -2,6 +2,7 @@
 __pycache__
 .ipynb_checkpoints
 finetune/runs/
+outputs/
 finetune/manifests_ft/
 container/e2v-ft-sandbox/
 container/build-temp-*/
@@ -10,3 +11,4 @@ data/clips/
 finetune/manifests_src/
 .omo
 data
+models
