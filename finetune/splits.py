@@ -6,8 +6,9 @@ OGVC-Acted / OGVC-Natural / HCUDB1; clips materialized under
 splits each dataset into train/eval/test, and records every exclusion (which
 speaker or utterance was dropped and why) so the split is fully auditable.
 
-HCUDB1 is an evaluation-only corpus: every kept row goes to eval.jsonl and no
-train.jsonl/test.jsonl is written, so the training loop never sees it.
+HCUDB1 is an evaluation-only corpus: only the rows of the selected speakers
+(2 female + 2 male) go to eval.jsonl and no train.jsonl/test.jsonl is
+written, so the training loop never sees it.
 
 Usage:
     python finetune/splits.py [--manifest-root DIR] [--out-root DIR] [--seed 42]
@@ -47,9 +48,15 @@ JTES_TEST_SPEAKERS = ["f16", "f35", "m14", "m22"]
 # appears in every split.
 UTTERANCE_SPLIT = {"train": 0.7, "eval": 0.15, "test": 0.15}
 
-# Corpora used only for evaluation: all kept rows go to eval.jsonl, no
-# train/test manifest is written (HCUDB1 is not part of the training data).
-EVAL_ONLY = {"hcudb1"}
+# Corpora used only for evaluation: only the selected speakers' rows go to
+# eval.jsonl and no train/test manifest is written (HCUDB1 is not part of the
+# training data).
+# HCUDB1's 14 speakers are narrowed to 2 female + 2 male (user decision
+# 2026-11-18) to keep the evaluation set small: 4 x 9 emotions x 10 lines x
+# 3 takes = 1,080 utterances. The other 10 speakers are recorded as
+# "speaker_not_selected" exclusions.
+EVAL_ONLY_SPEAKERS = {"hcudb1": ["FA", "FB", "MC", "ME"]}
+EVAL_ONLY = set(EVAL_ONLY_SPEAKERS)
 
 
 def load_manifest(path: Path) -> list[dict]:
@@ -242,9 +249,17 @@ def build_dataset(name: str, manifest: Path, out_root: Path, seed: int) -> dict:
     kept = filter_rows(rows, name, exclusions)
 
     if name in EVAL_ONLY:
-        splits = {"eval": kept}
-        method = "evaluation-only (all kept rows; never used for training)"
-        assignment = {}
+        wanted = EVAL_ONLY_SPEAKERS[name]
+        available = {r["speaker"] for r in kept}
+        missing = set(wanted) - available
+        if missing:
+            raise ValueError(f"{name}: eval speakers missing from manifest: {sorted(missing)}")
+        splits = {"eval": [r for r in kept if r["speaker"] in set(wanted)]}
+        exclusions.extend(_excl(r, "speaker_not_selected", name)
+                          for r in kept if r["speaker"] not in set(wanted))
+        method = (f"evaluation-only (speakers={','.join(wanted)}; "
+                  "never used for training)")
+        assignment = {"eval": sorted(wanted)}
     elif name == "jtes":
         splits = split_jtes(kept)
         method = "speaker-based (user-fixed: eval=f10,f29,m10,m20; test=f16,f35,m14,m22)"

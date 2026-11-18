@@ -102,18 +102,26 @@ def test_hcudb1_mapping_covers_all_but_ambiguous_emotions():
 
 def test_eval_only_dataset_writes_no_train_manifest(tmp_path):
     from splits import build_dataset
-    rows = [
-        {"dataset": "hcudb1", "utt_id": f"FA-01-01-{i}", "speaker": "FA",
-         "native_emotion": "冷静", "canonical_emotion": "NEU", "excluded": False,
-         "clip_path": f"/x/FA-01-01-{i}.wav"}
-        for i in range(4)
-    ]
+    rows = []
+    # every selected speaker plus one speaker that must be dropped
+    for spk in ("FA", "FB", "MC", "ME", "FG"):
+        for i in range(2):
+            rows.append({"dataset": "hcudb1", "utt_id": f"{spk}-01-01-{i}",
+                         "speaker": spk, "native_emotion": "冷静",
+                         "canonical_emotion": "NEU", "excluded": False,
+                         "clip_path": f"/x/{spk}-01-01-{i}.wav"})
     manifest = tmp_path / "hcudb1.jsonl"
     manifest.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
                         encoding="utf-8")
     out = tmp_path / "out"
     info = build_dataset("hcudb1", manifest, out, seed=42)
-    assert (info["train"], info["eval"], info["test"]) == (0, 4, 0)
+    assert (info["train"], info["eval"], info["test"]) == (0, 8, 0)
     assert (out / "hcudb1" / "eval.jsonl").is_file()
     assert not (out / "hcudb1" / "train.jsonl").exists()
     assert not (out / "hcudb1" / "test.jsonl").exists()
+    written = [json.loads(l) for l in
+               (out / "hcudb1" / "eval.jsonl").read_text(encoding="utf-8").splitlines() if l]
+    assert {r["speaker"] for r in written} == {"FA", "FB", "MC", "ME"}
+    excl = json.loads((out / "hcudb1" / "exclusions.json").read_text(encoding="utf-8"))
+    assert excl["n_excluded"] == 2
+    assert {e["reason"] for e in excl["exclusions"]} == {"speaker_not_selected"}
