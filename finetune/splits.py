@@ -1,10 +1,13 @@
 """Train/eval/test split builder for the Japanese emotional-speech fine-tuning.
 
 Reads the manifests produced by finetune/build_clips.py (JVNV / JTES /
-OGVC-Acted / OGVC-Natural; clips materialized under <repo>/data/clips),
-OGVC-Natural), filters rows to the emotion2vec+ 9-class label space, splits
-each dataset into train/eval/test, and records every exclusion (which
+OGVC-Acted / OGVC-Natural / HCUDB1; clips materialized under
+<repo>/data/clips), filters rows to the emotion2vec+ 9-class label space,
+splits each dataset into train/eval/test, and records every exclusion (which
 speaker or utterance was dropped and why) so the split is fully auditable.
+
+HCUDB1 is an evaluation-only corpus: every kept row goes to eval.jsonl and no
+train.jsonl/test.jsonl is written, so the training loop never sees it.
 
 Usage:
     python finetune/splits.py [--manifest-root DIR] [--out-root DIR] [--seed 42]
@@ -44,6 +47,10 @@ JTES_TEST_SPEAKERS = ["f16", "f35", "m14", "m22"]
 # appears in every split.
 UTTERANCE_SPLIT = {"train": 0.7, "eval": 0.15, "test": 0.15}
 
+# Corpora used only for evaluation: all kept rows go to eval.jsonl, no
+# train/test manifest is written (HCUDB1 is not part of the training data).
+EVAL_ONLY = {"hcudb1"}
+
 
 def load_manifest(path: Path) -> list[dict]:
     rows = []
@@ -71,7 +78,8 @@ def filter_rows(rows: list[dict], dataset: str, exclusions: list[dict]) -> list[
     for r in rows:
         canon = r.get("canonical_emotion")
         if r.get("excluded") or canon is None:
-            reason = "excluded_emotion" if r.get("excluded") else "no_canonical_emotion"
+            reason = (r.get("exclusion_reason")
+                      or ("excluded_emotion" if r.get("excluded") else "no_canonical_emotion"))
             exclusions.append(_excl(r, reason, dataset))
             continue
         if canon not in LABEL_TO_IDX or canon in ("OTHER", "UNKNOWN"):
@@ -233,7 +241,11 @@ def build_dataset(name: str, manifest: Path, out_root: Path, seed: int) -> dict:
     exclusions: list[dict] = []
     kept = filter_rows(rows, name, exclusions)
 
-    if name == "jtes":
+    if name in EVAL_ONLY:
+        splits = {"eval": kept}
+        method = "evaluation-only (all kept rows; never used for training)"
+        assignment = {}
+    elif name == "jtes":
         splits = split_jtes(kept)
         method = "speaker-based (user-fixed: eval=f10,f29,m10,m20; test=f16,f35,m14,m22)"
         assignment = {
@@ -261,10 +273,10 @@ def build_dataset(name: str, manifest: Path, out_root: Path, seed: int) -> dict:
                      splits)
     return {"dataset": name, "source": len(rows), "kept": len(kept),
             "excluded": len(exclusions),
-            **{s: len(splits[s]) for s in ("train", "eval", "test")}}
+            **{s: len(splits.get(s, [])) for s in ("train", "eval", "test")}}
 
 
-DATASETS = ["jvnv", "jtes", "ogvc_acted", "ogvc_natural"]
+DATASETS = ["jvnv", "jtes", "ogvc_acted", "ogvc_natural", "hcudb1"]
 
 
 def main(argv: list[str] | None = None) -> int:

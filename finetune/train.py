@@ -72,7 +72,8 @@ def main(argv: list[str] | None = None) -> int:
                          "HuggingFace HuBERT dir (config.json + pytorch_model.bin); "
                          "required via CLI or config")
     ap.add_argument("--manifest-root", type=Path, default=here / "manifests_ft")
-    ap.add_argument("--datasets", nargs="*", default=["jvnv", "jtes", "ogvc_acted", "ogvc_natural"])
+    ap.add_argument("--datasets", nargs="*",
+                    default=["jvnv", "jtes", "ogvc_acted", "ogvc_natural", "hcudb1"])
     ap.add_argument("--train-blocks", type=int, default=3,
                     help="number of top transformer blocks to train (emotion2vec base: "
                          "3 -> blocks.5-7; HuBERT base: 3 -> encoder.layers.9-11)")
@@ -193,22 +194,33 @@ def main(argv: list[str] | None = None) -> int:
     for ds in args.datasets:
         tr = args.manifest_root / ds / "train.jsonl"
         ev = args.manifest_root / ds / "eval.jsonl"
-        if not tr.is_file():
-            logger.warning("skip missing %s", tr)
+        if not tr.is_file() and not ev.is_file():
+            logger.warning("skip %s: neither %s nor %s exists", ds, tr, ev)
             continue
-        if args.limit:
-            tmp = args.out / f"_smoke_train_{ds}.jsonl"
-            tmp.write_text("".join(read_head(tr, args.limit)), encoding="utf-8")
-            tr = tmp
-            if ev.is_file():
+        if tr.is_file():
+            if args.limit:
+                tmp = args.out / f"_smoke_train_{ds}.jsonl"
+                tmp.write_text("".join(read_head(tr, args.limit)), encoding="utf-8")
+                tr = tmp
+            train_specs.append((ds, tr))
+        else:
+            # Evaluation-only corpus (e.g. hcudb1): all rows go to eval, the
+            # dataset never contributes a training batch.
+            logger.info("%s is evaluation-only (missing %s): excluded from training", ds, tr)
+        if ev.is_file():
+            if args.limit:
                 tmp = args.out / f"_smoke_eval_{ds}.jsonl"
                 tmp.write_text("".join(read_head(ev, args.limit)), encoding="utf-8")
                 ev = tmp
-        train_specs.append((ds, tr))
-        if ev.is_file():
             eval_specs.append((ds, ev))
         else:
             logger.warning("skip missing %s", ev)
+    logger.info("train datasets: %s | eval datasets: %s",
+                [n for n, _ in train_specs] or "none", [n for n, _ in eval_specs] or "none")
+    if not train_specs:
+        logger.error("no trainable dataset under %s (eval-only corpora cannot train)",
+                     args.manifest_root)
+        return 2
 
     balanced_sampler = None
     if args.dataset_sampling == "balance":

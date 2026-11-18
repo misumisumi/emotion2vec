@@ -3,7 +3,7 @@
 arch: emotion2vec
 model_dir: models/emotion2vec_plus_base
 manifest_root: finetune/manifests_ft
-datasets: [jvnv, jtes, ogvc_acted, ogvc_natural]
+datasets: [jvnv, jtes, ogvc_acted, ogvc_natural, hcudb1]  # hcudb1 is eval-only
 train_blocks: 3
 epochs: 20
 batch_size: 32
